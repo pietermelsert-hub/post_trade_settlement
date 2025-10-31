@@ -2,71 +2,85 @@ import pandas as pd
 import math
 
 # === PARAMETERS ===
-INPUT_FILE = "export.csv"
+INPUT_FILE = "export_NetTradeReport.csv"
 OUTPUT_FILE = "filtered_assets.csv"
-MIN_THRESHOLD = 0  # Set to 7500 if you want to filter
+MIN_THRESHOLD = 5000  # optional filter
 
 
 def get_round_base(value):
-    """Return rounding base depending on order of magnitude."""
-    if value == 0:
+    """Return rounding base depending on value magnitude."""
+    if value < 10:
         return 1
     magnitude = int(math.log10(abs(value)))
-    # For example:
-    # 100–999   → base 10
-    # 1,000–9,999 → base 500
-    # 10,000–99,999 → base 1,000
-    # 100,000–999,999 → base 10,000
-    # 1,000,000–9,999,999 → base 100,000
     if magnitude <= 2:
-        return 5
+        return 10
     elif magnitude == 3:
-        return 500
+        return 100
     elif magnitude == 4:
         return 1000
     elif magnitude == 5:
         return 10000
     elif magnitude == 6:
         return 100000
-    elif magnitude == 7:
-        return 1000000
     else:
-        # default for large numbers
         return 10 ** (magnitude - 1)
 
 
-def directional_round(value, direction):
-    """Round value up or down depending on direction and magnitude."""
-    base = get_round_base(value)
+def directional_adjust_and_round(value, direction, asset):
+    """Apply ±10% and round by direction/magnitude. BTC gets ±0.1."""
+    if str(asset).upper() == "BTC":
+        if direction == "down":
+            return round(value - 0.1, 1)
+        elif direction == "up":
+            return round(value + 0.1, 1)
+        return round(value, 1)
+
+    # Apply 10% adjustment
     if direction == "down":
-        return math.floor(value / base) * base
+        adjusted = value * 0.9
     elif direction == "up":
-        return math.ceil(value / base) * base
-    return value
+        adjusted = value * 1.1
+    else:
+        adjusted = value
+
+    # Determine rounding base and apply rounding
+    base = get_round_base(adjusted)
+    if direction == "down":
+        return math.floor(adjusted / base) * base
+    elif direction == "up":
+        return math.ceil(adjusted / base) * base
+    else:
+        return round(adjusted)
 
 
 # === LOAD DATA ===
 df = pd.read_csv(INPUT_FILE)
-df["Nominal amount"] = pd.to_numeric(df["Nominal amount"], errors="coerce")
+df["Native amount"] = pd.to_numeric(df["Native amount"], errors="coerce")
 
-# Optional filtering
+# === OPTIONAL FILTER ===
 if MIN_THRESHOLD > 0:
     df = df[df["Nominal amount"] >= MIN_THRESHOLD]
 
-# === APPLY ROUNDING ===
-def adjust_nominal(row):
-    value = row["Nominal amount"]
+# === APPLY LOGIC ===
+def adjust_native(row):
+    val = row["Native amount"]
+    frm = str(row["from"]).upper()
+    to = str(row["to"]).upper()
+    asset = str(row["Asset"]).upper() if "Asset" in row else ""
 
-    if row["from"] == "CM" and row["to"] == "QF":
-        return directional_round(value, "down")
-    elif row["from"] == "QF" and row["to"] == "CM":
-        return directional_round(value, "up")
+    if frm == "CM" and to == "QF":
+        return directional_adjust_and_round(val, "down", asset)
+    elif frm == "QF" and to == "CM":
+        return directional_adjust_and_round(val, "up", asset)
     else:
-        return value
+        return val
 
 
-df["Rounded number"] = df.apply(adjust_nominal, axis=1)
+df["Adjusted Native"] = df.apply(adjust_native, axis=1)
+
+# === KEEP ONLY REQUIRED COLUMNS ===
+final_df = df[["Asset", "from", "to", "Adjusted Native"]]
 
 # === SAVE OUTPUT ===
-df.to_csv(OUTPUT_FILE, index=False)
-print(f"Rounded values saved to {OUTPUT_FILE}")
+final_df.to_csv(OUTPUT_FILE, index=False)
+print(f"Adjusted data saved to {OUTPUT_FILE}")
