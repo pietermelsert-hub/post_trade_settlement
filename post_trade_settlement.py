@@ -4,37 +4,69 @@ import math
 # === PARAMETERS ===
 INPUT_FILE = "export.csv"
 OUTPUT_FILE = "filtered_assets.csv"
-MIN_THRESHOLD = 7500  # Minimum nominal amount threshold
+MIN_THRESHOLD = 0  # Set to 7500 if you want to filter
+
+
+def get_round_base(value):
+    """Return rounding base depending on order of magnitude."""
+    if value == 0:
+        return 1
+    magnitude = int(math.log10(abs(value)))
+    # For example:
+    # 100–999   → base 10
+    # 1,000–9,999 → base 500
+    # 10,000–99,999 → base 1,000
+    # 100,000–999,999 → base 10,000
+    # 1,000,000–9,999,999 → base 100,000
+    if magnitude <= 2:
+        return 5
+    elif magnitude == 3:
+        return 500
+    elif magnitude == 4:
+        return 1000
+    elif magnitude == 5:
+        return 10000
+    elif magnitude == 6:
+        return 100000
+    elif magnitude == 7:
+        return 1000000
+    else:
+        # default for large numbers
+        return 10 ** (magnitude - 1)
+
+
+def directional_round(value, direction):
+    """Round value up or down depending on direction and magnitude."""
+    base = get_round_base(value)
+    if direction == "down":
+        return math.floor(value / base) * base
+    elif direction == "up":
+        return math.ceil(value / base) * base
+    return value
+
 
 # === LOAD DATA ===
 df = pd.read_csv(INPUT_FILE)
-
-# Ensure numeric type for nominal amounts
 df["Nominal amount"] = pd.to_numeric(df["Nominal amount"], errors="coerce")
 
-# === FILTER BY THRESHOLD ===
-filtered_df = df[df["Nominal amount"] >= MIN_THRESHOLD].copy()
+# Optional filtering
+if MIN_THRESHOLD > 0:
+    df = df[df["Nominal amount"] >= MIN_THRESHOLD]
 
-# === ROUNDING LOGIC ===
+# === APPLY ROUNDING ===
 def adjust_nominal(row):
-    nominal = row["Nominal amount"]
+    value = row["Nominal amount"]
 
-    if row["From"] == "CM" and row["To"] == "QF":
-        adjusted = math.floor(nominal * 0.95)
-    elif row["From"] == "QF" and row["To"] == "CM":
-        adjusted = math.ceil(nominal * 1.05)
+    if row["from"] == "CM" and row["to"] == "QF":
+        return directional_round(value, "down")
+    elif row["from"] == "QF" and row["to"] == "CM":
+        return directional_round(value, "up")
     else:
-        adjusted = nominal  # leave unchanged
+        return value
 
-    # If the asset is BTC, round to whole number
-    if str(row["Asset"]).upper() == "BTC":
-        adjusted = round(adjusted)
 
-    return adjusted
-
-filtered_df["Adjusted Nominal"] = filtered_df.apply(adjust_nominal, axis=1)
+df["Rounded number"] = df.apply(adjust_nominal, axis=1)
 
 # === SAVE OUTPUT ===
-filtered_df.to_csv(OUTPUT_FILE, index=False)
-
-print(f"Filtered and adjusted data saved to {OUTPUT_FILE}")
+df.to_csv(OUTPUT_FILE, index=False)
+print(f"Rounded values saved to {OUTPUT_FILE}")
